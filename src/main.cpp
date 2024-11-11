@@ -6,7 +6,7 @@
 #include <SPI.h>
 #include <StreamUtils.h>
 
-#define DEBUG
+// #define DEBUG
 
 #define HALT()                                                                 \
   {                                                                            \
@@ -141,14 +141,15 @@ void setup() {
     HALT();
   }
 
-  const uint16_t fbSize = tft.width() * tft.height() * sizeof(uint16_t);
-  framebuf = (uint16_t*)malloc(fbSize);
+  const uint16_t framebufSize = tft.width() * tft.height() * sizeof(uint16_t);
+  framebuf = (uint16_t*)malloc(framebufSize);
   if (framebuf == nullptr) {
-    logger.printf("Failed to allocate framebuffer of size %d bytes\n", fbSize);
+    logger.printf("Failed to allocate framebuffer of size %d bytes\n",
+                  framebufSize);
     HALT();
   } else {
-    memset(framebuf, 0, tft.width() * tft.height() * sizeof(uint16_t));
-    logger.printf("Allocated framebuffer of size %d bytes\n", fbSize);
+    memset(framebuf, 0, framebufSize);
+    logger.printf("Allocated framebuffer of size %d bytes\n", framebufSize);
   }
 
   gif.begin(LITTLE_ENDIAN_PIXELS);
