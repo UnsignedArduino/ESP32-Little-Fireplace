@@ -4,6 +4,17 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <SPI.h>
+#include <StreamUtils.h>
+
+#define DEBUG
+
+#define HALT()                                                                 \
+  {                                                                            \
+    digitalWrite(LED_BUILTIN, HIGH);                                           \
+    while (true) {                                                             \
+      yield();                                                                 \
+    }                                                                          \
+  }
 
 const uint8_t TFT_CS = 5;
 const uint8_t TFT_RST = 16;
@@ -26,6 +37,7 @@ void GIFCloseFile(void* pHandle) {
   File* f = static_cast<File*>(pHandle);
   if (f != nullptr) {
     f->close();
+    delete f;
   }
 }
 
@@ -34,22 +46,21 @@ int32_t GIFReadFile(GIFFILE* pFile, uint8_t* pBuf, int32_t iLen) {
   iBytesRead = iLen;
   File* f = static_cast<File*>(pFile->fHandle);
   // Note: If you read a file all the way to the last byte, seek() stops working
-  if ((pFile->iSize - pFile->iPos) < iLen)
+  if ((pFile->iSize - pFile->iPos) < iLen) {
     iBytesRead = pFile->iSize - pFile->iPos - 1; // <-- ugly work-around
-  if (iBytesRead <= 0)
+  }
+  if (iBytesRead <= 0) {
     return 0;
+  }
   iBytesRead = (int32_t)f->read(pBuf, iBytesRead);
   pFile->iPos = f->position();
   return iBytesRead;
 }
 
 int32_t GIFSeekFile(GIFFILE* pFile, int32_t iPosition) {
-  //  int i = micros();
   File* f = static_cast<File*>(pFile->fHandle);
   f->seek(iPosition);
   pFile->iPos = (int32_t)f->position();
-  //  i = micros() - i;
-  //  Serial.printf("Seek time = %d us\n", i);
   return pFile->iPos;
 }
 
@@ -131,47 +142,80 @@ void GIFDraw(GIFDRAW* pDraw) {
     tft.writePixels(usTemp, iWidth, false, false);
     tft.endWrite();
   }
-} /* GIFDraw() */
+}
 
 void setup() {
   Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
 
   tft.initR(INITR_BLACKTAB);
   tft.setSPISpeed(40000000);
   tft.setRotation(1);
   tft.fillScreen(ST77XX_BLACK);
 
+  tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
+  tft.setCursor(0, 0);
+  tft.setTextSize(1);
+  tft.setTextWrap(true);
+  WriteLoggingStream logger(Serial, tft);
+
   if (!LittleFS.begin()) {
-    Serial.println("Failed to mount file system");
-    return;
+    logger.println("Failed to mount file system");
+    HALT();
   }
 
   gif.begin(LITTLE_ENDIAN_PIXELS);
-}
 
-void loop() {
-  if (gif.open("/gif.gif", GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile,
-               GIFDraw)) {
+  logger.println("Opening GIF file /fireplace.gif");
+  if (gif.open("/fireplace.gif", GIFOpenFile, GIFCloseFile, GIFReadFile,
+               GIFSeekFile, GIFDraw)) {
     GIFINFO gi;
-    Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n",
+    logger.printf("Successfully opened GIF\nCanvas size is %d by %d px\n",
                   gif.getCanvasWidth(), gif.getCanvasHeight());
     if (gif.getInfo(&gi)) {
-      Serial.printf("frame count: %d\n", gi.iFrameCount);
-      Serial.printf("duration: %d ms\n", gi.iDuration);
-      Serial.printf("max delay: %d ms\n", gi.iMaxDelay);
-      Serial.printf("min delay: %d ms\n", gi.iMinDelay);
+      logger.printf("frame count: %d\n", gi.iFrameCount);
+      logger.printf("duration: %d ms\n", gi.iDuration);
+      logger.printf("max delay: %d ms\n", gi.iMaxDelay);
+      logger.printf("min delay: %d ms\n", gi.iMinDelay);
     }
+#ifdef DEBUG
+    delay(1000);
+#endif
     while (true) {
-      while (gif.playFrame(true, nullptr)) {
-        ;
+      uint8_t i = 0;
+      uint32_t frameStart = millis();
+      while (true) {
+        int toDelay;
+        int result = gif.playFrame(false, &toDelay);
+        uint32_t frameDecodeEnd = millis();
+        if (result == 0) {
+          if (gif.getLastError() != GIF_SUCCESS &&
+              gif.getLastError() != GIF_EMPTY_FRAME) {
+            logger.printf("Error playing last frame = %d\n",
+                          gif.getLastError());
+            HALT();
+          }
+          break;
+        } else if (result < 0) {
+          logger.printf("Error playing frame = %d\n", gif.getLastError());
+          HALT();
+        }
+#ifdef DEBUG
+        tft.setCursor(0, 0);
+        tft.printf("#%d %d ms    ", i++, frameDecodeEnd - frameStart);
+#endif
+        while (millis() - frameStart < toDelay) {
+          yield();
+        }
+        frameStart = millis();
       }
       gif.reset();
     }
-    gif.close();
   } else {
-    Serial.printf("Error opening file = %d\n", gif.getLastError());
-    while (true) {
-      ;
-    }
+    logger.printf("Error opening file = %d\n", gif.getLastError());
+    HALT();
   }
 }
+
+void loop() {}
