@@ -2,8 +2,8 @@
 #include <Adafruit_ST7735.h>
 #include <AnimatedGIF.h>
 #include <Arduino.h>
+#include <LittleFS.h>
 #include <SPI.h>
-#include <badgers.h>
 
 const uint8_t TFT_CS = 5;
 const uint8_t TFT_RST = 16;
@@ -11,6 +11,47 @@ const uint8_t TFT_DC = 17;
 
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 AnimatedGIF gif;
+File file;
+
+void* GIFOpenFile(const char* fname, int32_t* pSize) {
+  file = LittleFS.open(fname);
+  if (file) {
+    *pSize = file.size();
+    return (void*)&file;
+  }
+  return nullptr;
+}
+
+void GIFCloseFile(void* pHandle) {
+  File* f = static_cast<File*>(pHandle);
+  if (f != nullptr) {
+    f->close();
+  }
+}
+
+int32_t GIFReadFile(GIFFILE* pFile, uint8_t* pBuf, int32_t iLen) {
+  int32_t iBytesRead;
+  iBytesRead = iLen;
+  File* f = static_cast<File*>(pFile->fHandle);
+  // Note: If you read a file all the way to the last byte, seek() stops working
+  if ((pFile->iSize - pFile->iPos) < iLen)
+    iBytesRead = pFile->iSize - pFile->iPos - 1; // <-- ugly work-around
+  if (iBytesRead <= 0)
+    return 0;
+  iBytesRead = (int32_t)f->read(pBuf, iBytesRead);
+  pFile->iPos = f->position();
+  return iBytesRead;
+}
+
+int32_t GIFSeekFile(GIFFILE* pFile, int32_t iPosition) {
+  //  int i = micros();
+  File* f = static_cast<File*>(pFile->fHandle);
+  f->seek(iPosition);
+  pFile->iPos = (int32_t)f->position();
+  //  i = micros() - i;
+  //  Serial.printf("Seek time = %d us\n", i);
+  return pFile->iPos;
+}
 
 void GIFDraw(GIFDRAW* pDraw) {
   uint8_t* s;
@@ -100,15 +141,37 @@ void setup() {
   tft.setRotation(1);
   tft.fillScreen(ST77XX_BLACK);
 
+  if (!LittleFS.begin()) {
+    Serial.println("Failed to mount file system");
+    return;
+  }
+
   gif.begin(LITTLE_ENDIAN_PIXELS);
 }
 
 void loop() {
-  if (gif.open((uint8_t*)badgers, sizeof(badgers), GIFDraw)) {
+  if (gif.open("/gif.gif", GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile,
+               GIFDraw)) {
+    GIFINFO gi;
     Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n",
                   gif.getCanvasWidth(), gif.getCanvasHeight());
-    while (gif.playFrame(true, NULL)) {
+    if (gif.getInfo(&gi)) {
+      Serial.printf("frame count: %d\n", gi.iFrameCount);
+      Serial.printf("duration: %d ms\n", gi.iDuration);
+      Serial.printf("max delay: %d ms\n", gi.iMaxDelay);
+      Serial.printf("min delay: %d ms\n", gi.iMinDelay);
+    }
+    while (true) {
+      while (gif.playFrame(true, nullptr)) {
+        ;
+      }
+      gif.reset();
     }
     gif.close();
+  } else {
+    Serial.printf("Error opening file = %d\n", gif.getLastError());
+    while (true) {
+      ;
+    }
   }
 }
