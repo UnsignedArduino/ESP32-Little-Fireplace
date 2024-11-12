@@ -138,10 +138,15 @@ void updateBacklight(bool instant = false) {
     if (instant) {
       currentBL = targetBL;
     } else {
+      // idk sometimes the brightness changes to zero randomly
       const uint32_t currentTime = millis();
-      const uint8_t percentChange =
-        (currentTime - timeSinceLastBLUpdate) / MS_PER_PERCENT_CHANGE;
-      currentBL += (targetBL - currentBL) * percentChange / 100;
+      const float percentChange =
+        ((float)currentTime - (float)timeSinceLastBLUpdate) /
+        (float)MS_PER_PERCENT_CHANGE;
+      currentBL +=
+        constrain((int16_t)round(((float)targetBL - (float)currentBL) *
+                                 (percentChange / 100)),
+                  0, 255);
     }
     analogWrite(TFT_BL, gamma8[currentBL]);
   }
