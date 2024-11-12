@@ -4,15 +4,12 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <SPI.h>
-#include <SimpleTouch.h>
 #include <StreamUtils.h>
-#include <gamma.h>
 
 // #define DEBUG
 
 #define HALT()                                                                 \
   {                                                                            \
-    analogWrite(TFT_BL, 255);                                                  \
     digitalWrite(LED_BUILTIN, HIGH);                                           \
     while (true) {                                                             \
       yield();                                                                 \
@@ -22,16 +19,11 @@
 const uint8_t TFT_CS = 5;
 const uint8_t TFT_RST = 16;
 const uint8_t TFT_DC = 17;
-const uint8_t TFT_BL = 32;
-
-const gpio_num_t TOUCH_PIN = GPIO_NUM_33;
 
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 AnimatedGIF gif;
 File file;
 uint16_t* framebuf = nullptr;
-
-SimpleTouch touch;
 
 void* GIFOpenFile(const char* fname, int32_t* pSize) {
   file = LittleFS.open(fname);
@@ -128,46 +120,15 @@ void GIFDraw(GIFDRAW* pDraw) {
   tft.writePixels(d, iWidth, false, false);
 }
 
-uint8_t targetBL = 255;
-const uint32_t MS_PER_PERCENT_CHANGE = 5;
-
-void updateBacklight(bool instant = false) {
-  static uint8_t currentBL = 255;
-  static uint32_t timeSinceLastBLUpdate = 0;
-  if (currentBL != targetBL || instant) {
-    if (instant) {
-      currentBL = targetBL;
-    } else {
-      // idk sometimes the brightness changes to zero randomly
-      const uint32_t currentTime = millis();
-      const float percentChange =
-        ((float)currentTime - (float)timeSinceLastBLUpdate) /
-        (float)MS_PER_PERCENT_CHANGE;
-      currentBL +=
-        constrain((int16_t)round(((float)targetBL - (float)currentBL) *
-                                 (percentChange / 100)),
-                  0, 255);
-    }
-    analogWrite(TFT_BL, gamma8[currentBL]);
-  }
-  timeSinceLastBLUpdate = millis();
-}
-
 void setup() {
   Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
-  touch.begin(TOUCH_PIN);
-
   tft.initR(INITR_BLACKTAB);
   tft.setSPISpeed(40000000);
   tft.setRotation(1);
   tft.fillScreen(ST77XX_BLACK);
-
-  pinMode(TFT_BL, OUTPUT);
-  targetBL = 255;
-  updateBacklight(true);
 
   tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
   tft.setCursor(0, 0);
@@ -219,9 +180,7 @@ void setup() {
         tft.startWrite();
         int result = gif.playFrame(false, &toDelay);
         tft.endWrite();
-#ifdef DEBUG
         uint32_t frameDecodeEnd = millis();
-#endif
         if (result == 0) {
           if (gif.getLastError() != GIF_SUCCESS &&
               gif.getLastError() != GIF_EMPTY_FRAME) {
@@ -238,14 +197,8 @@ void setup() {
         tft.setCursor(0, 0);
         tft.printf("#%d %d ms    ", i++, frameDecodeEnd - frameStart);
 #endif
-        updateBacklight();
         while (millis() - frameStart < toDelay) {
           yield();
-          touch.update();
-          if (touch.justPressed()) {
-            targetBL = targetBL == 255 ? 0 : 255;
-          }
-          digitalWrite(LED_BUILTIN, touch.isTouched());
         }
         frameStart = millis();
       }
